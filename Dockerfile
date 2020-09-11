@@ -25,5 +25,14 @@ RUN conda install -c etetoolkit --quiet --yes \
     conda clean --all -f -y && \
     fix-permissions "${CONDA_DIR}" && \
     fix-permissions "/home/${NB_USER}"
+    
+RUN conda install --quiet --yes \
+    'python-igraph' \
+    && \
+    conda clean --all -f -y && \
+    fix-permissions "${CONDA_DIR}" && \
+    fix-permissions "/home/${NB_USER}"
+
+RUN  git clone https://github.com/lthiberiol/evolSimIndex.git
 
 WORKDIR $HOME
