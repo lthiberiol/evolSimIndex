@@ -33,6 +33,8 @@ RUN conda install --quiet --yes \
     fix-permissions "${CONDA_DIR}" && \
     fix-permissions "/home/${NB_USER}"
 
+WORKDIR $HOME
+
 RUN  git clone https://github.com/lthiberiol/evolSimIndex.git
 
-WORKDIR $HOME
+WORKDIR evolSimIndex

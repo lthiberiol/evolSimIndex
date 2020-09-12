@@ -1,4 +1,4 @@
-# Evolitionary Similarity Index
+# Evolutionary Similarity Index
 <!-- badges: start -->
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/lthiberiol/evolSimIndex/blob/master/correlate_evolution.ipynb)
 <!--badges: end -->
