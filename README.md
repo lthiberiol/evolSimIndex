@@ -19,6 +19,7 @@ Have fun!
 ## Docker
 
 Available on [Docker Hub](https://hub.docker.com/r/thiberio/evolsimindex)
+
 `docker pull thiberio/evolsimindex` to download container...
 
-... once downloaded, run `docker run -p 8888:8888 thiberio/evolsimindex` and follow terminal instructions. Jupyter notebook will be available at `http://127.0.0.1:8888/?token=<token>`
+... once downloaded, run `docker run -p 8888:8888 thiberio/evolsimindex` and follow terminal instructions. Jupyter notebook will be available at `http://127.0.0.1:8888`
