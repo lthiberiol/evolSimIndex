@@ -6,13 +6,13 @@
 Assess evolutionary similarity between gene families
 
 ## Overview
-Evolutionary Similarity Index ( <img src="https://render.githubusercontent.com/render/math?math=I_{ES}">) is a metric for evolutionary similarity between gene families. It is the product of $I_{ES}=R^{2}*I_{BC}$.
+Evolutionary Similarity Index (<img src="https://render.githubusercontent.com/render/math?math=I_{ES}">) is a metric for evolutionary similarity between gene families. It is the product of <img src="https://render.githubusercontent.com/render/math?math=I_{ES}=R^{2}*I_{BC}">
 
-* $R^2$: is the coefficient of determination from an weighted Orthogonal Distance Regression
+* <img src="https://render.githubusercontent.com/render/math?math=R^{2}">: is the coefficient of determination from an weighted Orthogonal Distance Regression
 
-* $I_{BC}$: is $1-D_{BC}$, where $D_{BC}$ is the Bray-Curtis dissimilarity between two gene families.
+* <img src="https://render.githubusercontent.com/render/math?math=I_{BC}">: is $1-D_{BC}$, where $D_{BC}$ is the Bray-Curtis dissimilarity between two gene families.
 
-$I_{ES}$ is less susceptible to phylogenetic noise than its tree-based counterparts, and more computationally efficient given that it bypasses tree reconstruction.
+<img src="https://render.githubusercontent.com/render/math?math=I_{ES}"> is less susceptible to phylogenetic noise than its tree-based counterparts, and more computationally efficient given that it bypasses tree reconstruction.
 
 
 **Preprint avaialable on bioRxiv [not yet, chill out!](https://www.biorxiv.org/).**
