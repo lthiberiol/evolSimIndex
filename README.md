@@ -6,7 +6,7 @@
 Assess evolutionary similarity between gene families
 
 ## Overview
-Evolutionary Similarity Index (https://render.githubusercontent.com/render/math?math=I_{ES}) is a metric for evolutionary similarity between gene families. It is the product of $I_{ES}=R^{2}*I_{BC}$.
+Evolutionary Similarity Index ( <img src="https://render.githubusercontent.com/render/math?math=I_{ES}">) is a metric for evolutionary similarity between gene families. It is the product of $I_{ES}=R^{2}*I_{BC}$.
 
 * $R^2$: is the coefficient of determination from an weighted Orthogonal Distance Regression
 
