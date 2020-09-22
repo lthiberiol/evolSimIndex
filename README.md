@@ -3,12 +3,21 @@
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/lthiberiol/evolSimIndex/blob/master/correlate_evolution.ipynb)
 <!--badges: end -->
 
-Assess evolutionary similarity between gene familie
+Assess evolutionary similarity between gene families
 
 ## Overview
-To do...
+Evolutionary Similarity Index ($I_{ES}$) is a metric for evolutionary similarity between gene families. It is the product of $I_{ES}=R^{2}*I_{BC}$.
 
-Preprint avaialable on bioRxiv [not yet, chill out!](https://www.biorxiv.org/).
+* $R^2$: is the coefficient of determination from an weighted Orthogonal Distance Regression
+
+* $I_{BC}$: is $1-D_{BC}$, where $D_{BC}$ is the Bray-Curtis dissimilarity between two gene families.
+
+$I_{ES}$ is less susceptible to phylogenetic noise than its tree-based counterparts, and more computationally efficient given that it bypasses tree reconstruction.
+
+
+**Preprint avaialable on bioRxiv [not yet, chill out!](https://www.biorxiv.org/).**
+
+---
 
 ## Getting started
 Click the "Open in Colab" button above to get started. 
