@@ -10,7 +10,7 @@ Evolutionary Similarity Index (<img src="https://render.githubusercontent.com/re
 
 * <img src="https://render.githubusercontent.com/render/math?math=R^{2}">: is the coefficient of determination from an weighted Orthogonal Distance Regression
 
-* <img src="https://render.githubusercontent.com/render/math?math=I_{BC}">: is $1-D_{BC}$, where $D_{BC}$ is the Bray-Curtis dissimilarity between two gene families.
+* <img src="https://render.githubusercontent.com/render/math?math=I_{BC}">: is <img src="https://render.githubusercontent.com/render/math?math=1-D_{BC}">, where <img src="https://render.githubusercontent.com/render/math?math=D_{BC}"> is the Bray-Curtis dissimilarity between two gene families.
 
 <img src="https://render.githubusercontent.com/render/math?math=I_{ES}"> is less susceptible to phylogenetic noise than its tree-based counterparts, and more computationally efficient given that it bypasses tree reconstruction.
 
