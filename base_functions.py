@@ -198,7 +198,9 @@ def get_matrix_from_tree(newick_txt=None):
 
 
 # Match possibly co-evolving genes within a genome by looking for pairs minimzing wODR residuals
-def match_copies(matrix1, matrix2, taxa1, taxa2):
+def match_copies(matrix1, matrix2,
+                 taxa1,   taxa2,
+                 force_single_copy=False):
     """Select best pairing copies between assessed gene families
 
     :parameter matrix1: DataFrame with distances from gene1
@@ -305,6 +307,9 @@ def match_copies(matrix1, matrix2, taxa1, taxa2):
             best_pairs.add((first_row.homolog1, first_row.homolog2))
             homolog_combinations = homolog_combinations.query(f'(homolog1 != "{first_row.homolog1}") & '
                                                               f'(homolog2 != "{first_row.homolog2}")').copy()
+
+            if force_single_copy:
+                break
             
         # drop all gene combinations where one is not each other's best pairing
         for homolog1, homolog2 in best_pairs:
