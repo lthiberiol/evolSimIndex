@@ -56,13 +56,12 @@ def line(x, slope):
 def run_odr(x, y, x_weights, y_weights):
     """"receives pairwise distance matrices and wODR weights
 
-    Parameters:
-    X: pairwise distance matrix from gene1
-    Y: pairwise distance matrix from gene2
-    x_weights: wODR weights for gene1 distances
-    y_weights: wODR weights for gene2 distances
+    :parameter X: pairwise distance matrix from gene1
+    :parameter Y: pairwise distance matrix from gene2
+    :parameter x_weights: wODR weights for gene1 distances
+    :parameter y_weights: wODR weights for gene2 distances
 
-    returns an ODR object (https://docs.scipy.org/doc/scipy/reference/generated/scipy.odr.ODR.html)
+    :return ODR object (https://docs.scipy.org/doc/scipy/reference/generated/scipy.odr.ODR.html)
     """
     mod = Model(line)
     dat = Data(x, 
@@ -87,10 +86,9 @@ def estimate_weights(x, y, weight_estimation='gm'):
     $\delta$ are X axis residuals
     $\epsilon$ are Y axis residuals
 
-    Parameters:
-    X: pairwise distance matrix from gene1
-    Y: pairwise distance matrix from gene2
-    weight_estimation:
+    :parameter X: pairwise distance matrix from gene1
+    :parameter Y: pairwise distance matrix from gene2
+    :parameter weight_estimation:
         'gm' - estimate weights using geometric mean slope (default)
         'huber' - estimate weights from robust non-quadratic Huber Regression function
         'ols' - estimate weights using OLS
@@ -144,11 +142,11 @@ def estimate_weights(x, y, weight_estimation='gm'):
 # 
 # > If all assessed gene families are single copies, `separators` and *\<gene ids>* may be ignored.
 
-# #### Load data from ".mldist" file
+#  Load data from ".mldist" file
 def load_matrix(file_path=None):
     """Load <.mldist> file from IQTree into pandas DataFrame
 
-    file_path: path to <.mldist> file
+    :parameter file_path: path to <.mldist> file
     """
         
     dist_matrix = pd.read_csv(file_path,
@@ -161,11 +159,11 @@ def load_matrix(file_path=None):
     return(dist_matrix)
 
 
-# #### Alternativelly, load pairwise distances from newick file
+# Alternativelly, load pairwise distances from newick file
 def get_matrix_from_tree(newick_txt=None):
     """Load pairwise distance matrix from newick tree.
 
-    newick_text: tree in newick format, not its path, but tree itself (string)
+    :parameter newick_text: tree in newick format, not its path, but tree itself (string)
     """
     tree = ete3.Tree(newick_txt, format=1)
 
@@ -199,8 +197,16 @@ def get_matrix_from_tree(newick_txt=None):
     return(dist_matrix)
 
 
-# #### Match possibly co-evolving genes within a genome by looking for pairs minimzing wODR residuals
+# Match possibly co-evolving genes within a genome by looking for pairs minimzing wODR residuals
 def match_copies(matrix1, matrix2, taxa1, taxa2):
+    """Select best pairing copies between assessed gene families
+
+    :parameter matrix1: DataFrame with distances from gene1
+    :parameter matrix2: DataFrame with distances from gene2
+    :parameter taxa1: taxon table from gene1 (pd.DataFrame)
+    :parameter taxa2: taxon table from gene2 (pd.DataFrame)
+
+    Return paired copies of input DataFrames"""
     
     all_taxon_pairs           = pd.DataFrame()
     all_taxon_pairs['taxon1'] = [re.sub('\|\d$', '', taxon, flags=re.M)
@@ -325,12 +331,18 @@ def match_copies(matrix1, matrix2, taxa1, taxa2):
     return(matrix1, taxa1, matrix2, taxa2)
 
 
-# #### Balance distance matrices, duplicate rows/columns to reflect multiples copies in the compared gene families
-
-# In[9]:
-
-
+# Balance distance matrices, duplicate rows/columns to reflect multiples copies in the compared gene families
 def balance_matrices(matrix1, matrix2):
+    """Remove taxa present in only one matrix, and sort matrices to match taxon order in both DataFrames
+
+    :parameter matrix1: DataFrame with distances from gene1
+    :parameter matrix2: DataFrame with distances from gene2
+
+    :return sorted matrix1
+    :return sorted matrix1
+    :return taxon table from gene1 (pd.DataFrame)
+    :return taxon table from gene2 (pd.DataFrame)
+    """
 
     if gene_ids.value:
         shared_genomes = np.intersect1d(matrix1.index,
@@ -431,11 +443,16 @@ def balance_matrices(matrix1, matrix2):
 
 
 # ### Where the magic happens
-
-# In[10]:
-
-
 def assess_coevolution(matrix1, matrix2):
+    """Calculate $I_ES$ between pairwise matrices.
+
+    :parameter matrix1: DataFrame containing pairwise distances from gene1
+    :parameter matrix2: DataFrame containing pairwise distances from gene2
+
+    :return wODR coefficient of determination (R^2)
+    :return Bray-Curtis Index (Ibc)
+    :return Evolutionary Similarity Index (Ies), product between $R^2 * Ibc$
+    """
 
     matrix1, taxa1, matrix2, taxa2 = balance_matrices(matrix1.copy(), 
                                                       matrix2.copy())
@@ -528,10 +545,6 @@ def assess_coevolution(matrix1, matrix2):
         r2 * Ibc # Evolutionary Similarity Index(Ies)
     )
 
-
-# In[11]:
-
-
 # dist1 = run_dist_matrix('/work/clusterEvo/distance_matrices/000284/000284')
 # dist2 = run_dist_matrix('/work/clusterEvo/distance_matrices/000302/000302')
 
@@ -549,227 +562,4 @@ def assess_coevolution(matrix1, matrix2):
 ##   Sum of squares convergence
 ##
 ## R**2 = 0.8947962483462916
-
-
-# ## Crappy notebook interface, but still an interface!
-
-# In[12]:
-
-
-evol_dist_source = widgets.Dropdown(
-    options    =[('',                       0       ), 
-                 ('FASTA files',            'fasta' ), 
-                 ('IQTree ".mldist" files', 'matrix'), 
-                 ('newick files',           'tree'  ),
-#                  ('example',                'example')
-                ],
-    disabled   =False,
-    indent     =False,
-    value      =0,
-    layout     ={'width':'auto'}
-)
-
-must_align = widgets.Checkbox(
-    value   =False,  
-    disabled=True,
-    indent  =False,
-    description='Provided FASTAS are not yet aligned',
-    layout     ={'width':'auto'}
-)
-
-gene_ids = widgets.Checkbox(
-    value   =False,  
-    disabled=False,
-    indent  =False,
-    description='Sequences are identified by genome only '
-    '(all sequences from the same genome have the same name)',
-    layout     ={'width':'auto'}
-)
-
-min_taxa_overlap = widgets.IntText(value      =5, 
-                                   indent     =False,
-                                   disabled   =False)
-
-genome_gene_sep = widgets.Dropdown(
-    options    =[('',                                     0  ), 
-                 ('<genome>_<gene>', '_'), 
-                 ('<genome>|<gene>', '|'), 
-                 ('<genome>.<gene>', '.')],
-    disabled   =False,
-    indent     =True,
-    value      =0,
-    layout     ={'width':'auto'}
-)
-
-input_files = widgets.FileUpload(
-    accept  ='',   # Accepted file extension e.g. '.txt', '.pdf', 'image/*', 'image/*,.pdf'
-    multiple=True, # True to accept multiple files upload else False
-    disabled=True
-)
-
-def toggle_align_widgets(dropdown_source):
-    input_files.disabled = not dropdown_source.new
-    
-    if dropdown_source.new == 'fasta':
-        must_align.disabled = False
-#     elif dropdown_source.new == 'example':
-#         genome_gene_sep.value = '_'
-#         input_files.disabled  = True
-    else:
-        must_align.disabled = True
-        must_align.value    = False
-    
-def toggle_genome_gene_sep(checkbox):
-    genome_gene_sep.disabled = checkbox.new
-    if checkbox.new:
-        genome_gene_sep.value = 0
-        
-def clear_uploads(*args):
-    input_files.value.clear()
-    input_files._counter = 0
-    input_files.disabled = False
-    
-    evol_dist_source.value = 0
-    genome_gene_sep.value  = 0
-    
-    example.flag = False
-        
-clear_button = widgets.Button(description='Clear upload',
-                              button_style='warning',
-                              tooltip     ='Click to clear uploaded files')
-clear_button.on_click(clear_uploads)
-
-evol_dist_source.observe(toggle_align_widgets, names='value')
-gene_ids.observe(toggle_genome_gene_sep,       names='value')
-
-
-#
-# load example
-#
-example = widgets.Button(description='Load example',
-                         button_style='success',
-                         tooltip     ='Load example parameters')
-example.flag = False    
-def load_example(*args):
-    evol_dist_source.disabled = False
-    evol_dist_source.value    = 'matrix'
-    
-    genome_gene_sep.value     = '_'
-    
-    input_files.disabled      = True
-    
-    example.flag = True
-    
-example.on_click(load_example)
-
-#
-# submit data
-#
-def run_all(ev):
-    display(Javascript('IPython.notebook.execute_cells_below()'))
-
-submit = widgets.Button(description ="Submit",
-                        button_style='success',
-                        tooltip     ='Click here to continue with provided data')
-submit.on_click(run_all)
-
-#
-# threads
-#
-num_threads = widgets.IntSlider(min=1, 
-                                max=multiprocessing.cpu_count())
-
-#
-# download through colab
-#
-if in_colab:
-    def download(*args):
-        files.download('Ies.csv')
-
-    download_csv = widgets.Button(description='Download Ies.csv',
-                          button_style='success')
-    download_csv.on_click(download)
-
-
-# In[13]:
-
-
-display(widgets.HBox([widgets.Label('Source of pairwise distances (there is an "example" options): '), 
-                      evol_dist_source]),
-        must_align,
-        gene_ids,
-        widgets.HBox([widgets.Label('Genome and gene ids are separated by which character: '),
-                      genome_gene_sep]),
-        
-        widgets.HBox([widgets.Label('Minimum taxa containing both assessed gene families: '),
-                      min_taxa_overlap]),
-        
-        widgets.HBox([widgets.Label('Number of threads to use: '),
-                      num_threads]),
-        
-#         input_files,
-        widgets.HBox([input_files, example]),
-        clear_button,
-        submit
-       )
-
-
-# If `Submit` button above is not working, in the **Toolbar** click in `Cell`->`Run All Bellow`
-
-# #### Parsing provided data and parameters
-
-# In[14]:
-
-
-# @title Breaking "run all" if no data was uploadded
-
-if not input_files._counter > 1 and not example.flag:
-    raise ValueError('You must upload at least two files!')
-
-
-# In[ ]:
-
-
-# @title Loading data...
-
-dist_matrices = []
-group_names   = []
-
-if evol_dist_source.value == 'tree':
-    for file_name, file_itself in input_files.value.items():
-        dist_matrices.append( get_matrix_from_tree(file_itself['content'].decode('utf-8')) )
-        group_names.append( file_name )
-        
-elif evol_dist_source.value == 'matrix':
-    if not input_files._counter and example.flag:
-        for file_itself in ['000284', '000302', '000304', '000321', '000528', 
-#                             '000574', '000575', '000595', '000602', '000607',
-#                             '000611', '000617', '000620', '000621', '000625',
-                            '000632', '000645', '000647', '000657', '000663']:
-            dist_matrices.append(load_matrix(
-                f'https://raw.githubusercontent.com/lthiberiol/evolSimIndex/master/tests/{file_itself}.mldist'
-            ))
-            group_names.append( file_itself )
-    else:
-        for file_name, file_itself in input_files.value.items():
-            dist_matrices.append( load_matrix(BytesIO(file_itself['content'])) )
-            group_names.append( file_name )
-        
-if   genome_gene_sep.value == '_':
-    parse_leaf = re.compile('^(GC[AF]_\d+(?:\.\d)?)[_|](.*)$')
-elif genome_gene_sep.value == '|':
-    parse_leaf = re.compile('^(\S+?)\|(\S+)$')
-elif genome_gene_sep.value == '.':
-    parse_leaf = re.compile('^(\d+?)\.(.*)$')
-    
-if min_taxa_overlap.value < 2:
-    min_taxa_overlap.value = 2
-
-
-# ## Assessing evolutionary similarity between gene families!
-
-# In[ ]:
-
-
-get_ipython().run_cell_magic('time', '', '\nprint(f\'Assessing Ies between {len(group_names)} genes\')\nprint(f\'\\t**using {num_threads.value} threads\\n\')\n\nmatrix_combinations     = itertools.combinations(dist_matrices, 2)\ngroup_name_combinations = itertools.combinations(group_names,   2)\ngroup_name_combinations = np.array( list(group_name_combinations) )\n\npool    = multiprocessing.Pool(processes=num_threads.value)\nresults = pool.starmap(assess_coevolution, matrix_combinations)\npool.close()\npool.join()\n\ncoevol_df = pd.DataFrame(columns=[\'R_squared\', \'Ibc\', \'Ies\'], \n                         data   =results)\n\ncoevol_df[\'gene1\'] = group_name_combinations[:, 0]\ncoevol_df[\'gene2\'] = group_name_combinations[:, 1]\n\ncoevol_df.to_csv(\'Ies.csv\')\n\nif not in_colab:\n    local_file = FileLink(\'Ies.csv\', result_html_prefix="Click here to download: ")\n    display(local_file)\nelse:\n    display(download_csv)')
 
