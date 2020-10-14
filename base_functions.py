@@ -26,7 +26,6 @@ import igraph     as ig
 import numpy      as np
 import seaborn    as sns
 import pandas     as pd
-import ipywidgets as widgets
 
 import sys
 import random
@@ -63,15 +62,15 @@ def run_odr(x, y, x_weights, y_weights):
 
     :return ODR object (https://docs.scipy.org/doc/scipy/reference/generated/scipy.odr.ODR.html)
     """
-    mod = Model(line)
-    dat = Data(x, 
+    mod  = Model(line)
+    data = Data(x, 
                y, 
                wd=x_weights, 
                we=y_weights
     )
-    odr = ODR(dat, 
-              mod,
-              beta0=[np.std(y)/np.std(x)])
+    odr  = ODR(data, 
+               mod,
+               beta0=[np.std(y)/np.std(x)])
     return(odr.run())
 
 
@@ -165,37 +164,50 @@ def get_matrix_from_tree(newick_txt=None):
 
     :parameter newick_text: tree in newick format, not its path, but tree itself (string)
     """
+    #
+    # create ete3.TreeNode object from newick string
     tree = ete3.Tree(newick_txt, format=1)
 
     leaf_names = tree.get_leaf_names()
+    #
+    # add/overwrite internal branch names
     for count, node in enumerate(tree.traverse()):
         if not node.is_leaf():
             node.name = 'node_%i' % count
 
+    #
+    # create an edge list from parent node to descendants the will be used to populate network
+    #     branch length will be used as edge weights
     edges = []
     for node in tree.traverse():
+        #
+        # if node is a terminal one (i.e. leaf) there are no descendants to proceed...
         if not node.is_leaf():
             for child in node.get_children():
                 edges.append((node.name,
                               child.name,
                               child.dist))
 
+    #
+    # load the Directed Acyclic Graph to iGraph, it calculates pairwise distances MUCH, MUCH FASTER than ete3
+    #     despite calling it a DAG, the resulting network is undirected, otherwise it would be impossible to 
+    #     to retrieve distances between leaves...
     dag  = ig.Graph.TupleList(edges     =tuple(edges), 
-                              directed  =False,
-                              edge_attrs=['weight']
-                             )
+                              directed  =False, # yeah, the name is misleading, but trees are DAGs...
+                              edge_attrs=['weight'])
     
-    patristic_distances     = np.array(dag.shortest_paths(source=leaf_names, 
-                                                          target=leaf_names, 
-                                                          weights='weight'))
-                                       
+    patristic_distances = np.array(dag.shortest_paths(source =leaf_names, 
+                                                      target =leaf_names, 
+                                                      weights='weight'))
+
+    #
+    # add zeros to the diagonal...
     np.fill_diagonal(patristic_distances, 0.0)
     
     dist_matrix = pd.DataFrame(index  =leaf_names, 
                                columns=leaf_names, 
                                data   =patristic_distances)
     return(dist_matrix)
-
 
 # Match possibly co-evolving genes within a genome by looking for pairs minimzing wODR residuals
 def match_copies(matrix1, matrix2,
@@ -210,27 +222,37 @@ def match_copies(matrix1, matrix2,
 
     Return paired copies of input DataFrames"""
     
+    #
+    # create a single DataFrame matching taxa from both gene families, and 
+    #     remove "|<num>" identification for added copies
     all_taxon_pairs           = pd.DataFrame()
     all_taxon_pairs['taxon1'] = [re.sub('\|\d$', '', taxon, flags=re.M)
                                 for taxon in taxa1.taxon]
     all_taxon_pairs['taxon2'] = [re.sub('\|\d$', '', taxon, flags=re.M)
                                 for taxon in taxa2.taxon]
 
+    #
+    # summarize distances matrices by using only its upper triangle (triu)
     triu_indices = np.triu_indices_from(matrix1, k=1)
     condensed1   = matrix1.values[triu_indices]
     condensed2   = matrix2.values[triu_indices]
 
+    #
+    # run ODR with no weights...
     model = Model(line)
     data  = Data(condensed1, 
                  condensed2)
     odr   = ODR(data, 
                 model,
-                beta0=[np.std(condensed2) /
-                       np.std(condensed1)]
+                beta0=[np.std(condensed2) / # Geometric Mean slope estimate
+                       np.std(condensed1)]  #
                )
 
     regression = odr.run()
 
+    #
+    # create DataFrame with all residuals from the preliminary ODR with all 
+    #      possible combinations of gene within the same genome
     residual_df = pd.DataFrame(columns=['x_taxon1',   'x_genome1', 
                                         'x_taxon2',   'x_genome2', 
 
@@ -253,24 +275,44 @@ def match_copies(matrix1, matrix2,
                               )
     residual_df['combined_residual'] = residual_df.x_residual + residual_df.y_residual
 
+    #
+    # we won't acknowledge residuals from pairs within the same genome, as they
+    #     obligatorily include false pairings they can be very misleading...
+    #
+    # identify within genome residuals here...
     within_genomes = ((residual_df.x_genome1 == residual_df.x_genome2) | 
                       (residual_df.y_genome1 == residual_df.y_genome2))
-
+    #
+    # ... and remove them here!
     residual_df.drop(index  =residual_df.index[within_genomes], 
                      inplace=True)
     
+    #
+    # traverse genomes with duplicated gene...
+    #     the "for" notation is weird, but ".duplicated()" will return all
+    #     duplicated genomes, all copies, and ".unique()" will filter to a 
+    #     single one!
     for genome in taxa1.genome[taxa1.genome.duplicated()].unique():
     
+        #
+        # all homologs from <genome> in <gene family1>
         matrix1_homologs = taxa1.loc[taxa1.genome==genome, 
                                      'taxon'].values
+        #
+        # and all homologs from <genome> in <gene family2>
         matrix2_homologs = taxa2.loc[taxa2.genome==genome, 
                                      'taxon'].values
 
+        #
+        # empy DataFrame to be filled with residuals from pairs of homologs from
+        #     both gene families
         homolog_combinations = pd.DataFrame(columns=['homolog1', 
                                                      'homolog2', 
                                                      'residual_sum'])
         for homolog1, homolog2 in itertools.product(matrix1_homologs,
                                                     matrix2_homologs):
+            #
+            # retrieve all datapoints involving <homolog1> and <homolog2>
             tmp_df = residual_df.query('(x_taxon1 == @homolog1 | x_taxon2 == @homolog1) &'
                                        '(y_taxon1 == @homolog2 | y_taxon2 == @homolog2)')
 
@@ -300,6 +342,11 @@ def match_copies(matrix1, matrix2,
                 ignore_index=True
             )
 
+        #
+        # sort pairs of possibly co-evolving genes based on its sum of residuals
+        #     the pair with the smallest sum of residuals is the one deviating
+        #     the least from the expected linear association between pairwise
+        #     distances!
         homolog_combinations.sort_values('residual_sum', inplace=True)
         best_pairs = set()
         while homolog_combinations.shape[0]:
@@ -307,7 +354,7 @@ def match_copies(matrix1, matrix2,
             best_pairs.add((first_row.homolog1, first_row.homolog2))
             homolog_combinations = homolog_combinations.query(f'(homolog1 != "{first_row.homolog1}") & '
                                                               f'(homolog2 != "{first_row.homolog2}")').copy()
-
+            
             if force_single_copy:
                 break
             
@@ -337,7 +384,7 @@ def match_copies(matrix1, matrix2,
 
 
 # Balance distance matrices, duplicate rows/columns to reflect multiples copies in the compared gene families
-def balance_matrices(matrix1, matrix2):
+def balance_matrices(matrix1, matrix2, gene_ids):
     """Remove taxa present in only one matrix, and sort matrices to match taxon order in both DataFrames
 
     :parameter matrix1: DataFrame with distances from gene1
@@ -350,6 +397,9 @@ def balance_matrices(matrix1, matrix2):
     """
 
     if gene_ids.value:
+        #
+        # if there are no gene ids, there is not much to do, just prune genomes
+        #     present in only one of the gene families.
         shared_genomes = np.intersect1d(matrix1.index,
                                         matrix2.index)
 
@@ -363,6 +413,9 @@ def balance_matrices(matrix1, matrix2):
         return (matrix1, None,
                 matrix2, None)
     
+    #
+    # create DataFrames for taxa in each gene family, break sequence names into
+    #     <genome> and <gene>, and add together with original sequence name
     tmp_taxa = []
     for index in matrix1.index:
         genome, gene = re.search(parse_leaf, index).groups()
@@ -377,17 +430,24 @@ def balance_matrices(matrix1, matrix2):
     taxa2 = pd.DataFrame(columns=['taxon', 'genome', 'gene'],
                          data=tmp_taxa)
 
+    #
+    # genomes present in both gene families...
     shared_genomes = np.intersect1d(taxa1.genome.unique(), 
                                     taxa2.genome.unique())
-
+    # ... and remove genomes occurring into a single gene family from taxa 
+    #     DataFrame
     taxa1 = taxa1[taxa1.genome.isin(shared_genomes)]
     taxa2 = taxa2[taxa2.genome.isin(shared_genomes)]
-
-    if not taxa1.genome.is_unique or not taxa2.genome.is_unique:
     
+    if not taxa1.genome.is_unique or not taxa2.genome.is_unique:
+        #
+        # get the number of copies of both gene families within each genome
         taxa1_frequency = taxa1.genome.value_counts() 
         taxa2_frequency = taxa2.genome.value_counts() 
-
+        
+        #
+        # once both gene families contain the same genomes, go through genomes
+        #     duplicated in one of them
         for genome in shared_genomes:
             genome1_count = taxa1_frequency[genome]
             genome2_count = taxa2_frequency[genome]
@@ -440,6 +500,9 @@ def balance_matrices(matrix1, matrix2):
                               columns=taxa2.taxon, 
                               copy   =True)
     
+    #
+    # once matrices were sorted to contain every possible pair between genes
+    #     present in the same genome, submit it to the <match_copies> function
     if not taxa1.genome.is_unique or not taxa2.genome.is_unique:
         matrix1, taxa1, matrix2, taxa2 = match_copies(matrix1, matrix2, taxa1, taxa2)
     
@@ -448,7 +511,7 @@ def balance_matrices(matrix1, matrix2):
 
 
 # ### Where the magic happens
-def assess_coevolution(matrix1, matrix2):
+def assess_coevolution(matrix1, matrix2, gene_ids):
     """Calculate $I_ES$ between pairwise matrices.
 
     :parameter matrix1: DataFrame containing pairwise distances from gene1
@@ -459,9 +522,14 @@ def assess_coevolution(matrix1, matrix2):
     :return Evolutionary Similarity Index (Ies), product between $R^2 * Ibc$
     """
 
+    #
+    # balance taxa and matrices from each gene families
+    #
     matrix1, taxa1, matrix2, taxa2 = balance_matrices(matrix1.copy(), 
-                                                      matrix2.copy())
-
+                                                      matrix2.copy(),
+                                                      gene_ids)
+    #
+    # test if gene families have the minimum overlap between each other.
     min_overlap = True
     if not gene_ids.value and taxa1.genome.unique().shape[0] < min_taxa_overlap.value:
         min_overlap = False
@@ -474,15 +542,19 @@ def assess_coevolution(matrix1, matrix2):
               file=sys.stderr)
         return([None, None])
 
-    condensed1 = squareform(matrix1.values, checks=False)
-    condensed2 = squareform(matrix2.values, checks=False)
-    
+    #
+    # generate condensed matrices
+    triu_indices = np.triu_indices_from(matrix1, k=1)
+    condensed1   = matrix1.values[triu_indices]
+    condensed2   = matrix2.values[triu_indices]    
+    #
+    # estimate weights
     odr_weights = estimate_weights(condensed1, condensed2)
-    
+    #
+    # run wODR with condensed matrices and estimated weights
     regression = run_odr(condensed1, 
                          condensed2, 
                          *odr_weights)
-    
     #
     # calculate R^2 from wODR model.
     mean_x = np.mean(condensed1)
@@ -516,7 +588,7 @@ def assess_coevolution(matrix1, matrix2):
     
 
     #
-    # bray-curtis step
+    # calculate bray-curtis dissimilarity from taxa tables
     #    
     if gene_ids.value:
         taxa1 = matrix1.index.tolist()
@@ -540,7 +612,7 @@ def assess_coevolution(matrix1, matrix2):
             freq2_input.append(freq2[taxon])
         else:
             freq2_input.append(0)    
-            
+    
     Ibc = 1 - braycurtis(freq1_input, freq2_input)
 
     return(
