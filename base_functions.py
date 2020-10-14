@@ -19,8 +19,6 @@ from sklearn.linear_model   import HuberRegressor
 from copy                   import deepcopy
 from collections            import Counter
 from scipy.stats            import pearsonr
-from io                     import BytesIO, StringIO
-from IPython.display        import Javascript, FileLink
 
 import igraph     as ig
 import numpy      as np
@@ -39,14 +37,12 @@ import itertools
 class correlate_evolution:
 
     def __init__(self,
-                 gene_ids,
-                 must_align,
-                 genome_gene_sep,
-                 min_taxa_overlap)
-        self.gene_ids         = gene_ids
-        self.must_align       = must_align
-        self.genome_gene_sep  = genome_gene_sep
-        self.min_taxa_overlap = min_taxa_overlap
+                 gene_ids        =False,
+                 parse_leaf      =re.compile('^(GC[AF]_\d+(?:\.\d)?)[_|](.*)$'),
+                 min_taxa_overlap=5):
+        self.gene_ids        =gene_ids
+        self.parse_leaf      =parse_leaf
+        self.min_taxa_overlap=min_taxa_overlap
 
 # #### Base linear model
 # 
@@ -404,7 +400,7 @@ class correlate_evolution:
         :return taxon table from gene2 (pd.DataFrame)
         """
 
-        if self.gene_ids.value:
+        if self.gene_ids:
             #
             # if there are no gene ids, there is not much to do, just prune genomes
             #     present in only one of the gene families.
@@ -426,14 +422,14 @@ class correlate_evolution:
         #     <genome> and <gene>, and add together with original sequence name
         tmp_taxa = []
         for index in matrix1.index:
-            genome, gene = re.search(parse_leaf, index).groups()
+            genome, gene = re.search(self.parse_leaf, index).groups()
             tmp_taxa.append([index, genome, gene])
         taxa1 = pd.DataFrame(columns=['taxon', 'genome', 'gene'],
                              data   =tmp_taxa)
 
         tmp_taxa = []
         for index in matrix2.index:
-            genome, gene = re.search(parse_leaf, index).groups()
+            genome, gene = re.search(self.parse_leaf, index).groups()
             tmp_taxa.append([index, genome, gene])
         taxa2 = pd.DataFrame(columns=['taxon', 'genome', 'gene'],
                              data=tmp_taxa)
@@ -537,13 +533,13 @@ class correlate_evolution:
         #
         # test if gene families have the minimum overlap between each other.
         min_overlap = True
-        if not self.gene_ids.value and taxa1.genome.unique().shape[0] < self.min_taxa_overlap.value:
+        if not self.gene_ids and taxa1.genome.unique().shape[0] < self.min_taxa_overlap:
             min_overlap = False
-        elif   self.gene_ids.value and               matrix1.shape[0] < self.min_taxa_overlap.value:
+        elif   self.gene_ids and               matrix1.shape[0] < self.min_taxa_overlap:
             min_overlap = False
 
         if not min_overlap:
-            print(f'Assessed matrices have less than {self.min_taxa_overlap.value} taxa overlap. '
+            print(f'Assessed matrices have less than {self.min_taxa_overlap} taxa overlap. '
                    'To change this behavior adjust overlap parameter.',
                   file=sys.stderr)
             return([None, None])
@@ -596,7 +592,7 @@ class correlate_evolution:
         #
         # calculate bray-curtis dissimilarity from taxa tables
         #
-        if self.gene_ids.value:
+        if self.gene_ids:
             taxa1 = matrix1.index.tolist()
             taxa2 = matrix2.index.tolist()
         else:
