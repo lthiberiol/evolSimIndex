@@ -235,6 +235,7 @@ class correlate_evolution:
                                     for taxon in taxa1.taxon]
         all_taxon_pairs['taxon2'] = [re.sub('\|\d$', '', taxon, flags=re.M)
                                     for taxon in taxa2.taxon]
+        all_taxon_pairs['genome'] = taxa1.genome.tolist()
 
         #
         # summarize distances matrices by using only its upper triangle (triu)
@@ -357,27 +358,64 @@ class correlate_evolution:
             while homolog_combinations.shape[0]:
                 first_row = homolog_combinations.iloc[0]
                 best_pairs.add((first_row.homolog1, first_row.homolog2))
-                homolog_combinations = homolog_combinations.query(f'(homolog1 != "{first_row.homolog1}") & '
-                                                                  f'(homolog2 != "{first_row.homolog2}")').copy()
+                homolog_combinations = homolog_combinations.query('(homolog1 != @first_row.homolog1) & '
+                                                                  '(homolog2 != @first_row.homolog2)').copy()
 
                 if force_single_copy:
                     break
 
-            # drop all gene combinations where one is not each other's best pairing
-            for homolog1, homolog2 in best_pairs:
+            if force_single_copy:
                 indices_to_drop = all_taxon_pairs.query(
-                    '(taxon1 == @homolog1 & taxon2 != @homolog2) |'
-                    '(taxon1 != @homolog1 & taxon2 == @homolog2)'
-                ).index
+                    'genome==@genome'
+                )
+                indices_to_drop = indices_to_drop.query(
+                    '(taxon1 == @first_row.homolog1 & taxon2 != @first_row.homolog2) |'
+                    '(taxon1 != @first_row.homolog1 & taxon2 == @first_row.homolog2)'
+                )
+                all_taxon_pairs.drop(index =indices_to_drop.index,
+                                     inplace=True)
+                taxa1.drop(          index  =indices_to_drop.index,
+                                     inplace=True)
+                taxa2.drop(          index  =indices_to_drop.index,
+                                     inplace=True)
 
-                all_taxon_pairs.drop(index=indices_to_drop,
-                                    inplace=True)
+                
+                indices_to_drop = all_taxon_pairs.query(
+                    'genome==@genome &'
+                    '(taxon1 != @first_row.homolog1 & taxon2 != @first_row.homolog2)'
+                )
+                all_taxon_pairs.drop(index =indices_to_drop.index,
+                                     inplace=True)
+                taxa1.drop(          index  =indices_to_drop.index,
+                                     inplace=True)
+                taxa2.drop(          index  =indices_to_drop.index,
+                                     inplace=True)
+                
+            else:
+            # drop all gene combinations where one is not each other's best pairing
+                for homolog1, homolog2 in best_pairs:
+                    indices_to_drop = all_taxon_pairs.query(
+                        '(taxon1 == @homolog1 & taxon2 != @homolog2) |'
+                        '(taxon1 != @homolog1 & taxon2 == @homolog2)'
+                    ).index
 
-                taxa1.drop(index  =indices_to_drop,
-                           inplace=True)
-                taxa2.drop(index  =indices_to_drop,
-                           inplace=True)
 
+                    all_taxon_pairs.drop(index =indices_to_drop,
+                                        inplace=True)
+
+                    taxa1.drop(index  =indices_to_drop,
+                               inplace=True)
+                    taxa2.drop(index  =indices_to_drop,
+                               inplace=True)
+
+        taxa1.drop_duplicates(subset =['genome', 'gene'], 
+                              inplace=True)
+        taxa2.drop_duplicates(subset =['genome', 'gene'], 
+                              inplace=True)
+        
+        if not all(taxa1.genome == taxa2.genome):
+            raise Exception('**Wow, taxa order is wrong! ABORT!!!')
+        
         matrix1 = matrix1.reindex(index  =taxa1.taxon,
                                   columns=taxa1.taxon,
                                   copy   =True)
@@ -386,9 +424,36 @@ class correlate_evolution:
                                   copy   =True)
 
         return(matrix1, taxa1, matrix2, taxa2)
+    
+    def get_Ibc(self, input1, input2, input_type='taxa_table'):
+        
+        if input_type=='matrix':
+            freq1 = Counter( input1.index.tolist() )
+            freq2 = Counter( input2.index.tolist() )
+
+        elif input_type=='taxa_table':
+            freq1 = Counter( input1.genome.tolist() )
+            freq2 = Counter( input2.genome.tolist() )
+
+        freq1_input = []
+        freq2_input = []
+        for taxon in set(freq1.keys()).union(freq2.keys()):
+            if taxon in freq1:
+                freq1_input.append(freq1[taxon])
+            else:
+                freq1_input.append(0)
+                
+            if taxon in freq2:
+                freq2_input.append(freq2[taxon])
+            else:
+                freq2_input.append(0)
+
+        Ibc = 1 - braycurtis(freq1_input, freq2_input)
+        
+        return(Ibc)
 
 # Balance distance matrices, duplicate rows/columns to reflect multiples copies in the compared gene families
-    def balance_matrices(self, matrix1, matrix2):
+    def balance_matrices(self, matrix1, matrix2, force_single_copy=False):
         """Remove taxa present in only one matrix, and sort matrices to match taxon order in both DataFrames
 
         :parameter matrix1: DataFrame with distances from gene1
@@ -401,6 +466,9 @@ class correlate_evolution:
         """
 
         if self.gene_ids:
+            Ibc = self.get_Ibc(matrix1, 
+                               matrix2,
+                               input_type='matrix')
             #
             # if there are no gene ids, there is not much to do, just prune genomes
             #     present in only one of the gene families.
@@ -415,7 +483,8 @@ class correlate_evolution:
                                       copy   =True)
 
             return (matrix1, None,
-                    matrix2, None)
+                    matrix2, None,
+                    Ibc)
 
         #
         # create DataFrames for taxa in each gene family, break sequence names into
@@ -433,6 +502,10 @@ class correlate_evolution:
             tmp_taxa.append([index, genome, gene])
         taxa2 = pd.DataFrame(columns=['taxon', 'genome', 'gene'],
                              data=tmp_taxa)
+        
+        Ibc = self.get_Ibc(taxa1, 
+                           taxa2,
+                           input_type='taxa_table')
 
         #
         # genomes present in both gene families...
@@ -508,10 +581,13 @@ class correlate_evolution:
         # once matrices were sorted to contain every possible pair between genes
         #     present in the same genome, submit it to the <match_copies> function
         if not taxa1.genome.is_unique or not taxa2.genome.is_unique:
-            matrix1, taxa1, matrix2, taxa2 = self.match_copies(matrix1, matrix2, taxa1, taxa2)
+            matrix1, taxa1, matrix2, taxa2 = self.match_copies(matrix1, matrix2, 
+                                                               taxa1,   taxa2, 
+                                                               force_single_copy)
 
         return(matrix1, taxa1,
-               matrix2, taxa2)
+               matrix2, taxa2,
+               Ibc)
 
 # ### Where the magic happens
     def assess_coevolution(self, matrix1, matrix2):
@@ -527,9 +603,10 @@ class correlate_evolution:
 
         #
         # balance taxa and matrices from each gene families
+        #   and calculate bray-curtis dissimilarity from input matrices
         #
-        matrix1, taxa1, matrix2, taxa2 = self.balance_matrices(matrix1.copy(),
-                                                          matrix2.copy())
+        matrix1, taxa1, matrix2, taxa2, Ibc = self.balance_matrices(matrix1.copy(),
+                                                                    matrix2.copy())
         #
         # test if gene families have the minimum overlap between each other.
         min_overlap = True
@@ -587,35 +664,6 @@ class correlate_evolution:
 
         r2 = 1 - SSres/SStot
     #     r2 = SSreg/SStot
-
-
-        #
-        # calculate bray-curtis dissimilarity from taxa tables
-        #
-        if self.gene_ids:
-            taxa1 = matrix1.index.tolist()
-            taxa2 = matrix2.index.tolist()
-        else:
-            taxa1 = taxa1.genome.tolist()
-            taxa2 = taxa2.genome.tolist()
-
-        taxon_intersect = set(taxa1).intersection(taxa2)
-        freq1 = Counter(taxa1)
-        freq2 = Counter(taxa2)
-
-        freq1_input = []
-        freq2_input = []
-        for taxon in set(taxa1).union(taxa2):
-            if taxon in freq1:
-                freq1_input.append(freq1[taxon])
-            else:
-                freq1_input.append(0)
-            if taxon in freq2:
-                freq2_input.append(freq2[taxon])
-            else:
-                freq2_input.append(0)
-
-        Ibc = 1 - braycurtis(freq1_input, freq2_input)
 
         return(
     #         regression,
