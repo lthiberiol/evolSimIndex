@@ -426,6 +426,7 @@ class correlate_evolution:
         return(matrix1, taxa1, matrix2, taxa2)
     
     def get_Ibc(self, input1, input2, input_type='taxa_table'):
+        #add comment
         
         if input_type=='matrix':
             freq1 = Counter( input1.index.tolist() )
