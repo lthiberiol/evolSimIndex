@@ -77,7 +77,8 @@ class correlate_evolution:
         )
         odr  = ODR(data,
                    mod,
-                   beta0=[np.std(y)/np.std(x)])
+                   beta0=[np.std(y)/np.std(x)]
+                  )
         return(odr.run())
 
 # #### Preliminary wODR weight estimation
@@ -231,10 +232,10 @@ class correlate_evolution:
         # create a single DataFrame matching taxa from both gene families, and
         #     remove "|<num>" identification for added copies
         all_taxon_pairs           = pd.DataFrame()
-        all_taxon_pairs['taxon1'] = [re.sub('\|\d$', '', taxon, flags=re.M)
-                                    for taxon in taxa1.taxon]
-        all_taxon_pairs['taxon2'] = [re.sub('\|\d$', '', taxon, flags=re.M)
-                                    for taxon in taxa2.taxon]
+        all_taxon_pairs['taxon1'] = [re.sub('\|\d+$', '', taxon, flags=re.M)
+                                     for taxon in taxa1.taxon]
+        all_taxon_pairs['taxon2'] = [re.sub('\|\d+$', '', taxon, flags=re.M)
+                                     for taxon in taxa2.taxon]
         all_taxon_pairs['genome'] = taxa1.genome.tolist()
 
         #
@@ -315,6 +316,7 @@ class correlate_evolution:
             homolog_combinations = pd.DataFrame(columns=['homolog1',
                                                          'homolog2',
                                                          'residual_sum'])
+            
             for homolog1, homolog2 in itertools.product(matrix1_homologs,
                                                         matrix2_homologs):
                 #
@@ -327,11 +329,11 @@ class correlate_evolution:
 
                 #
                 # remove "|<num>" sufix from taxon names to obtain original name
-                homolog1 = re.sub('\|\d$',
+                homolog1 = re.sub('\|\d+$',
                                   '',
                                   homolog1,
                                   flags=re.M)
-                homolog2 = re.sub('\|\d$',
+                homolog2 = re.sub('\|\d+$',
                                   '',
                                   homolog2,
                                   flags=re.M)
@@ -358,8 +360,13 @@ class correlate_evolution:
             while homolog_combinations.shape[0]:
                 first_row = homolog_combinations.iloc[0]
                 best_pairs.add((first_row.homolog1, first_row.homolog2))
-                homolog_combinations = homolog_combinations.query('(homolog1 != @first_row.homolog1) & '
-                                                                  '(homolog2 != @first_row.homolog2)').copy()
+                homolog_combinations.drop(index=homolog_combinations.query(
+                    '(homolog1 == @first_row.homolog1) | '
+                    '(homolog2 == @first_row.homolog2)'
+                ).index, 
+                                          inplace=True)
+#                 homolog_combinations = homolog_combinations.query('(homolog1 != @first_row.homolog1) & '
+#                                                                   '(homolog2 != @first_row.homolog2)').copy()
 
                 if force_single_copy:
                     break
@@ -408,6 +415,15 @@ class correlate_evolution:
                     taxa2.drop(index  =indices_to_drop,
                                inplace=True)
 
+        #
+        # Debugging
+        #
+        if taxa1[taxa1.duplicated(subset=['genome', 'gene'])].shape[0] or \
+           taxa2[taxa2.duplicated(subset=['genome', 'gene'])].shape[0]:
+            raise Exception('Duplicated genomes and genes, investigate...')
+            print(f'Duplicated genomes and genes, investigate...',
+                  file=sys.stderr)
+            
         taxa1.drop_duplicates(subset =['genome', 'gene'], 
                               inplace=True)
         taxa2.drop_duplicates(subset =['genome', 'gene'], 
@@ -512,6 +528,10 @@ class correlate_evolution:
         # genomes present in both gene families...
         shared_genomes = np.intersect1d(taxa1.genome.unique(),
                                         taxa2.genome.unique())
+        
+        if len(shared_genomes) < self.min_taxa_overlap:
+            return(None, None, None, None, Ibc)
+        
         # ... and remove genomes occurring into a single gene family from taxa
         #     DataFrame
         taxa1 = taxa1[taxa1.genome.isin(shared_genomes)]
@@ -530,41 +550,64 @@ class correlate_evolution:
                 genome1_count = taxa1_frequency[genome]
                 genome2_count = taxa2_frequency[genome]
 
-                if genome1_count > 1:
-                    #
-                    # one of the matrices must be traversed in the inversed order to make sure an
-                    #     all VS all combination is obtained. That is the reason of the "iloc[::-1]"
-                    #     during the querying
-                    tmp_df = taxa2.iloc[::-1].query('genome == @genome').copy()
-                    for _ in range(genome1_count - 1):
-                        for index, row in tmp_df.iterrows():
-                            tmp_row = row.copy()
-                            tmp_row.taxon += f'|{_}'
-                            taxa2      = taxa2.append(tmp_row, ignore_index=True)
+                if genome1_count > 1 or genome2_count > 1:
 
-                            reference_name = re.sub('\|\d+$', '', tmp_row.taxon, flags=re.M)
-                            matrix2[    tmp_row.taxon] = matrix2[    reference_name]
-                            matrix2.loc[tmp_row.taxon] = matrix2.loc[reference_name]
+                    tmp_df1 = taxa1.query('genome == @genome').copy()
+                    tmp_df2 = taxa2.query('genome == @genome').copy()
+
+                    names_to_delete1 = tmp_df1.taxon.tolist()
+                    names_to_delete2 = tmp_df2.taxon.tolist()
+
+                    count          = 0
+                    tmp_df1.taxon += f'|{count}'
+                    tmp_df2.taxon += f'|{count}'
+                    for (index1, row1), (index2, row2) in itertools.product(tmp_df1.iterrows(), 
+                                                                            tmp_df2.iterrows()):
+                        count += 1
+                        row1.taxon = re.sub('\|\d+$', 
+                                            fr'|{count}', 
+                                             row1.taxon,
+                                            re.M)
+
+                        taxa1       = taxa1.append(row1, 
+                                                   ignore_index=True)
+
+                        reference_name          = re.sub('\|\d+$', 
+                                                         '', 
+                                                         row1.taxon)
+                        matrix1[    row1.taxon] = matrix1[    reference_name]
+                        matrix1.loc[row1.taxon] = matrix1.loc[reference_name]
 
 
-                if genome2_count > 1:
-                    #
-                    # as we queried the other matrix in the reverse order, we traverse this one regularly
-                    tmp_df = taxa1.query('genome == @genome').copy()
-                    for _ in range(genome2_count - 1):
-                        for index, row in tmp_df.iterrows():
-                            tmp_row = row.copy()
-                            tmp_row.taxon += f'|{_}'
-                            taxa1 = taxa1.append(tmp_row, ignore_index=True)
+                        row2.taxon = re.sub('\|\d+$', 
+                                             f'|{count}', 
+                                             row2.taxon)
+                        taxa2       = taxa2.append(row2, 
+                                                   ignore_index=True)
 
-                            reference_name = re.sub('\|\d+$', '', tmp_row.taxon, flags=re.M)
-                            matrix1[    tmp_row.taxon] = matrix1[    reference_name]
-                            matrix1.loc[tmp_row.taxon] = matrix1.loc[reference_name]
+                        reference_name          = re.sub('\|\d+$', 
+                                                         '', 
+                                                         row2.taxon)
+                        matrix2[    row2.taxon] = matrix2[    reference_name]
+                        matrix2.loc[row2.taxon] = matrix2.loc[reference_name]
+
+
+                    taxa1.drop(  index  =taxa1.query('taxon.isin(@names_to_delete1)').index, 
+                                 inplace=True)
+                    matrix1.drop(index  =names_to_delete1, 
+                                 columns=names_to_delete1, 
+                                 inplace=True)
+
+                    taxa2.drop(index  =taxa2.query('taxon.isin(@names_to_delete2)').index, 
+                               inplace=True)
+                    matrix2.drop(index  =names_to_delete2, 
+                                 columns=names_to_delete2, 
+                                 inplace=True)
 
         #
         # sort both taxa tables according to genomes for properly matching
-        taxa1.sort_values('genome', inplace=True)
-        taxa2.sort_values('genome', inplace=True)
+        taxa1.sort_values('genome', kind='mergesort', inplace=True)
+        taxa2.sort_values('genome', kind='mergesort', inplace=True)
 
         taxa1.reset_index(drop=True, inplace=True)
         taxa2.reset_index(drop=True, inplace=True)
@@ -611,30 +654,41 @@ class correlate_evolution:
         #
         # test if gene families have the minimum overlap between each other.
         min_overlap = True
-        if not self.gene_ids and taxa1.genome.unique().shape[0] < self.min_taxa_overlap:
+        if matrix1 is None and matrix2 is None:
+            min_overlap = False
+        elif not self.gene_ids and taxa1.genome.unique().shape[0] < self.min_taxa_overlap:
             min_overlap = False
         elif   self.gene_ids and               matrix1.shape[0] < self.min_taxa_overlap:
             min_overlap = False
 
         if not min_overlap:
-            print(f'Assessed matrices have less than {self.min_taxa_overlap} taxa overlap. '
-                   'To change this behavior adjust overlap parameter.',
-                  file=sys.stderr)
-            return([None, None])
+#             print(f'Assessed matrices have less than {self.min_taxa_overlap} taxa overlap. '
+#                    'To change this behavior adjust overlap parameter.',
+#                   file=sys.stderr)
+            return([None, None, None])
 
         #
         # generate condensed matrices
         triu_indices = np.triu_indices_from(matrix1, k=1)
         condensed1   = matrix1.values[triu_indices]
         condensed2   = matrix2.values[triu_indices]
+        
+        if condensed1.std() == 0 or condensed2.std() == 0:
+            return(
+                0,
+                Ibc,
+                0 * Ibc # Evolutionary Similarity Index(Ies)
+            )
+
+        
         #
         # estimate weights
         odr_weights = self.estimate_weights(condensed1, condensed2)
         #
         # run wODR with condensed matrices and estimated weights
         regression = self.run_odr(condensed1,
-                             condensed2,
-                             *odr_weights)
+                                  condensed2,
+                                  *odr_weights)
         #
         # calculate R^2 from wODR model.
         mean_x = np.mean(condensed1)
