@@ -102,9 +102,9 @@ class correlate_evolution:
         if weight_estimation == 'gm':
             slope = np.std(y)/np.std(x)
             x_res = abs(x - self.line(y,
-                                 slope))
+                                      slope**-1))
             y_res = abs(y - self.line(x,
-                                 slope))
+                                      slope))
 
         elif weight_estimation == 'huber':
             huber_xy  = HuberRegressor(fit_intercept=False).fit(x.reshape(-1, 1), y)
