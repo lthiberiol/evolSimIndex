@@ -29,7 +29,7 @@ import itertools
 class correlate_evolution:
 
     def __init__(self,
-                 gene_ids        =False,
+                 gene_ids        =True,
                  parse_leaf      =re.compile('^(GC[AF]_\d+(?:\.\d)?)[_|](.*)$'),
                  min_taxa_overlap=5):
         self.gene_ids        =gene_ids
@@ -396,7 +396,7 @@ class correlate_evolution:
         :return taxon table from gene2 (pd.DataFrame)
         """
 
-        if self.gene_ids:
+        if not self.gene_ids:
             Ibc = self.get_Ibc(matrix1, 
                                matrix2,
                                input_type='matrix')
