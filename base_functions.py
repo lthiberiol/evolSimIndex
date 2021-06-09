@@ -589,9 +589,9 @@ class correlate_evolution:
         min_overlap = True
         if matrix1 is None and matrix2 is None:
             min_overlap = False
-        elif not self.gene_ids and taxa1.genome.unique().shape[0] < self.min_taxa_overlap:
+        elif     self.gene_ids and taxa1.genome.unique().shape[0] < self.min_taxa_overlap:
             min_overlap = False
-        elif   self.gene_ids and               matrix1.shape[0] < self.min_taxa_overlap:
+        elif not self.gene_ids and               matrix1.shape[0] < self.min_taxa_overlap:
             min_overlap = False
 
         if not min_overlap:
