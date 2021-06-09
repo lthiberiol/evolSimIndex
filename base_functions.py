@@ -11,27 +11,19 @@
 # Import all dependencies
 #
 from scipy.odr              import Model, Data, RealData, ODR
-from scipy.stats            import linregress
 from scipy.optimize         import curve_fit
-from scipy.spatial.distance import squareform, braycurtis
-from matplotlib             import pyplot as plt
 from sklearn.linear_model   import HuberRegressor
-from copy                   import deepcopy
 from collections            import Counter
-from scipy.stats            import pearsonr
 
 import igraph     as ig
 import numpy      as np
-import seaborn    as sns
 import pandas     as pd
 
 import sys
 import random
 import os
-import subprocess
 import re
 import ete3
-import multiprocessing
 import itertools
 
 class correlate_evolution:
@@ -216,8 +208,8 @@ class correlate_evolution:
 
 # Match possibly co-evolving genes within a genome by looking for pairs minimzing wODR residuals
     def match_copies(self,
-                     matrix1, matrix2,
-                     taxa1,   taxa2,
+                     matrix1, taxa1,
+                     matrix2, taxa2,
                      force_single_copy=False):
         """Select best pairing copies between assessed gene families
 
@@ -232,11 +224,10 @@ class correlate_evolution:
         # create a single DataFrame matching taxa from both gene families, and
         #     remove "|<num>" identification for added copies
         all_taxon_pairs           = pd.DataFrame()
-        all_taxon_pairs['taxon1'] = [re.sub('\|\d+$', '', taxon, flags=re.M)
-                                     for taxon in taxa1.taxon]
-        all_taxon_pairs['taxon2'] = [re.sub('\|\d+$', '', taxon, flags=re.M)
-                                     for taxon in taxa2.taxon]
+        all_taxon_pairs['gene1']  = taxa1.gene
+        all_taxon_pairs['gene2']  = taxa2.gene
         all_taxon_pairs['genome'] = taxa1.genome.tolist()
+        all_taxon_pairs['pairs']  = all_taxon_pairs[['gene1', 'gene2']].apply(lambda x: frozenset(x), axis=1)
 
         #
         # summarize distances matrices by using only its upper triangle (triu)
@@ -257,177 +248,97 @@ class correlate_evolution:
 
         regression = odr.run()
 
+        ############################################### new code...
         #
         # create DataFrame with all residuals from the preliminary ODR with all
         #      possible combinations of gene within the same genome
-        residual_df = pd.DataFrame(columns=['x_taxon1',   'x_genome1',
-                                            'x_taxon2',   'x_genome2',
+        residual_df = pd.DataFrame(columns=['matrix1_gene', 
+                                            'matrix2_gene', 
+                                            'genome',
+                                            'to_drop',
+                                            'combined_residual'],
+                                   data   =zip(taxa1.iloc[triu_indices[0], 0].values,
+                                               taxa2.iloc[triu_indices[0], 0].values,
+                                               taxa1.iloc[triu_indices[0], 1].values,
+                                               taxa1.iloc[triu_indices[0], 1].values == taxa1.iloc[triu_indices[1], 1].values,
+                                               abs(regression.delta)+abs(regression.eps))
+                                 )
 
-                                            'y_taxon1',   'y_genome1',
-                                            'y_taxon2',   'y_genome2',
-
-                                            'x_residual', 'y_residual'],
-                                   data=zip(matrix1.index[triu_indices[0]],        #x_taxon1
-                                            taxa1.iloc[triu_indices[0], 1].values, #x_genome1
-                                            matrix1.index[triu_indices[1]],        #x_taxon2
-                                            taxa1.iloc[triu_indices[1], 1].values, #x_genome2
-
-                                            matrix2.index[triu_indices[0]],        #y_taxon1
-                                            taxa2.iloc[triu_indices[0], 1].values, #y_genome1
-                                            matrix2.index[triu_indices[1]],        #y_taxon2
-                                            taxa2.iloc[triu_indices[1], 1].values, #y_genome2
-
-                                            abs(regression.delta),                 #x_residual
-                                            abs(regression.eps))                   #y_residual
-                                  )
-        residual_df['combined_residual'] = residual_df.x_residual + residual_df.y_residual
-
-        #
-        # we won't acknowledge residuals from pairs within the same genome, as they
-        #     obligatorily include false pairings they can be very misleading...
-        #
-        # identify within genome residuals here...
-        within_genomes = ((residual_df.x_genome1 == residual_df.x_genome2) |
-                          (residual_df.y_genome1 == residual_df.y_genome2))
-        #
-        # ... and remove them here!
-        residual_df.drop(index  =residual_df.index[within_genomes],
+        residual_df = residual_df.append(
+            pd.DataFrame(columns=['matrix1_gene', 
+                                  'matrix2_gene', 
+                                  'genome',
+                                  'to_drop',
+                                  'combined_residual'],
+                         data   =zip(taxa1.iloc[triu_indices[1], 0].values,
+                                     taxa2.iloc[triu_indices[1], 0].values,
+                                     taxa1.iloc[triu_indices[1], 1].values,
+                                     taxa1.iloc[triu_indices[0], 1].values == taxa1.iloc[triu_indices[1], 1].values,
+                                     abs(regression.delta)+abs(regression.eps))
+                        ),
+            sort        =True,
+            ignore_index=True
+        )
+        
+        residual_df.drop(index  =residual_df.index[residual_df.to_drop], 
                          inplace=True)
+                
+        sum_paired_residuals = residual_df.groupby(
+            ['matrix1_gene', 'matrix2_gene']
+        ).agg(
+            residual_sum=pd.NamedAgg(column ="combined_residual", 
+                                     aggfunc=sum),
+            genome      =pd.NamedAgg(column='genome', aggfunc=lambda x: x.iloc[0])
+        ).reset_index()
 
-        #
-        # traverse genomes with duplicated gene...
-        #     the "for" notation is weird, but ".duplicated()" will return all
-        #     duplicated genomes, all copies, and ".unique()" will filter to a
-        #     single one!
-        for genome in taxa1.genome[taxa1.genome.duplicated()].unique():
+        sum_paired_residuals.sort_values('residual_sum', 
+                                         inplace=True)
+        sum_paired_residuals.reset_index(inplace=True, 
+                                         drop   =True)
 
-            #
-            # all homologs from <genome> in <gene family1>
-            matrix1_homologs = taxa1.loc[taxa1.genome==genome,
-                                         'taxon'].values
-            #
-            # and all homologs from <genome> in <gene family2>
-            matrix2_homologs = taxa2.loc[taxa2.genome==genome,
-                                         'taxon'].values
+        best_pairs = pd.DataFrame(columns=['gene1', 'gene2', 'genome'])
+        for genome, indices in sum_paired_residuals.groupby('genome').groups.items():
 
-            #
-            # empy DataFrame to be filled with residuals from pairs of homologs from
-            #     both gene families
-            homolog_combinations = pd.DataFrame(columns=['homolog1',
-                                                         'homolog2',
-                                                         'residual_sum'])
-            
-            for homolog1, homolog2 in itertools.product(matrix1_homologs,
-                                                        matrix2_homologs):
-                #
-                # retrieve all datapoints involving <homolog1> and <homolog2>
-                tmp_df = residual_df.query('(x_taxon1 == @homolog1 | x_taxon2 == @homolog1) &'
-                                           '(y_taxon1 == @homolog2 | y_taxon2 == @homolog2)')
+            pairing_possibilities = sum_paired_residuals.loc[indices].copy()
 
-                if not tmp_df.shape[0]:
-                    continue
+            while pairing_possibilities.shape[0]:
+                first_row = pairing_possibilities.iloc[0]
 
-                #
-                # remove "|<num>" sufix from taxon names to obtain original name
-                homolog1 = re.sub('\|\d+$',
-                                  '',
-                                  homolog1,
-                                  flags=re.M)
-                homolog2 = re.sub('\|\d+$',
-                                  '',
-                                  homolog2,
-                                  flags=re.M)
-
-                # add all residuals related to each pair of possibly co-evolving genes
-                #     within a single genome to a dataframe
-                homolog_combinations = homolog_combinations.append(
-                    pd.Series(index=['homolog1',
-                                     'homolog2',
-                                     'residual_sum'],
-                              data =[homolog1,
-                                     homolog2,
-                                     tmp_df.combined_residual.sum()]),
+                best_pairs = best_pairs.append(
+                    pd.Series(index=['gene1', 
+                                     'gene2', 
+                                     'genome'],
+                              data =[first_row.matrix1_gene, 
+                                     first_row.matrix2_gene, 
+                                     genome]),
                     ignore_index=True
                 )
-
-            #
-            # sort pairs of possibly co-evolving genes based on its sum of residuals
-            #     the pair with the smallest sum of residuals is the one deviating
-            #     the least from the expected linear association between pairwise
-            #     distances!
-            homolog_combinations.sort_values('residual_sum', inplace=True)
-            best_pairs = set()
-            while homolog_combinations.shape[0]:
-                first_row = homolog_combinations.iloc[0]
-                best_pairs.add((first_row.homolog1, first_row.homolog2))
-                homolog_combinations.drop(index=homolog_combinations.query(
-                    '(homolog1 == @first_row.homolog1) | '
-                    '(homolog2 == @first_row.homolog2)'
-                ).index, 
-                                          inplace=True)
-#                 homolog_combinations = homolog_combinations.query('(homolog1 != @first_row.homolog1) & '
-#                                                                   '(homolog2 != @first_row.homolog2)').copy()
 
                 if force_single_copy:
                     break
 
-            if force_single_copy:
-                indices_to_drop = all_taxon_pairs.query(
-                    'genome==@genome'
-                )
-                indices_to_drop = indices_to_drop.query(
-                    '(taxon1 == @first_row.homolog1 & taxon2 != @first_row.homolog2) |'
-                    '(taxon1 != @first_row.homolog1 & taxon2 == @first_row.homolog2)'
-                )
-                all_taxon_pairs.drop(index =indices_to_drop.index,
-                                     inplace=True)
-                taxa1.drop(          index  =indices_to_drop.index,
-                                     inplace=True)
-                taxa2.drop(          index  =indices_to_drop.index,
-                                     inplace=True)
+                pairing_possibilities.drop(
+                    index=pairing_possibilities.query(
+                        '(matrix1_gene == @first_row.matrix1_gene) | '
+                        '(matrix2_gene == @first_row.matrix2_gene)'
+                    ).index, 
+                    inplace=True)
 
-                
-                indices_to_drop = all_taxon_pairs.query(
-                    'genome==@genome &'
-                    '(taxon1 != @first_row.homolog1 & taxon2 != @first_row.homolog2)'
-                )
-                all_taxon_pairs.drop(index =indices_to_drop.index,
-                                     inplace=True)
-                taxa1.drop(          index  =indices_to_drop.index,
-                                     inplace=True)
-                taxa2.drop(          index  =indices_to_drop.index,
-                                     inplace=True)
-                
-            else:
-            # drop all gene combinations where one is not each other's best pairing
-                for homolog1, homolog2 in best_pairs:
-                    indices_to_drop = all_taxon_pairs.query(
-                        '(taxon1 == @homolog1 & taxon2 != @homolog2) |'
-                        '(taxon1 != @homolog1 & taxon2 == @homolog2)'
-                    ).index
+        best_pairs['pairs'] = best_pairs[['gene1', 'gene2']].apply(lambda x: frozenset(x), 
+                                                                   axis=1)
 
+        all_taxon_pairs = all_taxon_pairs.query('pairs.isin(@best_pairs.pairs)').copy()
+        taxa1 = taxa1.reindex(index=all_taxon_pairs.index)
+        taxa2 = taxa2.reindex(index=all_taxon_pairs.index)
+        
+        taxa1.sort_values('genome', kind='mergesort', inplace=True)
+        taxa2.sort_values('genome', kind='mergesort', inplace=True)
 
-                    all_taxon_pairs.drop(index =indices_to_drop,
-                                        inplace=True)
+        taxa1.reset_index(drop=True, inplace=True)
+        taxa2.reset_index(drop=True, inplace=True)
 
-                    taxa1.drop(index  =indices_to_drop,
-                               inplace=True)
-                    taxa2.drop(index  =indices_to_drop,
-                               inplace=True)
+        ############################################### ...up to here
 
-        #
-        # Debugging
-        #
-        if taxa1[taxa1.duplicated(subset=['genome', 'gene'])].shape[0] or \
-           taxa2[taxa2.duplicated(subset=['genome', 'gene'])].shape[0]:
-            raise Exception('Duplicated genomes and genes, investigate...')
-            print(f'Duplicated genomes and genes, investigate...',
-                  file=sys.stderr)
-            
-        taxa1.drop_duplicates(subset =['genome', 'gene'], 
-                              inplace=True)
-        taxa2.drop_duplicates(subset =['genome', 'gene'], 
-                              inplace=True)
         
         if not all(taxa1.genome == taxa2.genome):
             raise Exception('**Wow, taxa order is wrong! ABORT!!!')
@@ -465,9 +376,12 @@ class correlate_evolution:
             else:
                 freq2_input.append(0)
 
-        Ibc = 1 - braycurtis(freq1_input, freq2_input)
-        
-        return(Ibc)
+        numerator, denominator = 0, 0
+        for tmp1, tmp2 in zip(freq1_input, freq2_input):
+            numerator   += abs(tmp1 - tmp2)
+            denominator += abs(tmp1 + tmp2)
+
+        return( 1- numerator/denominator )
 
 # Balance distance matrices, duplicate rows/columns to reflect multiples copies in the compared gene families
     def balance_matrices(self, matrix1, matrix2, force_single_copy=False):
@@ -543,67 +457,96 @@ class correlate_evolution:
             taxa1_frequency = taxa1.genome.value_counts()
             taxa2_frequency = taxa2.genome.value_counts()
 
-            #
-            # once both gene families contain the same genomes, go through genomes
-            #     duplicated in one of them
+            ############################################### new code...
+            grouped_taxa1 = taxa1.groupby('genome')
+            grouped_taxa2 = taxa2.groupby('genome')
+        
+            taxa1['new_taxon_name'] = taxa1.taxon
+            taxa2['new_taxon_name'] = taxa2.taxon
+
+            new_taxa1 = pd.DataFrame(columns=['new_taxon_name', 
+                                              'taxon', 
+                                              'genome',
+                                              'gene'])
+            new_taxa2 = pd.DataFrame(columns=['new_taxon_name', 
+                                              'taxon', 
+                                              'genome', 
+                                              'gene'])
+
             for genome in shared_genomes:
-                genome1_count = taxa1_frequency[genome]
-                genome2_count = taxa2_frequency[genome]
+                
+                if taxa1_frequency[genome] > 1 or taxa2_frequency[genome] > 1:
 
-                if genome1_count > 1 or genome2_count > 1:
+                    sub_taxa1 = grouped_taxa1.get_group(genome)
+                    sub_taxa2 = grouped_taxa2.get_group(genome)
 
-                    tmp_df1 = taxa1.query('genome == @genome').copy()
-                    tmp_df2 = taxa2.query('genome == @genome').copy()
+                    for count, ((index1, row1), 
+                                (index2, row2)) in enumerate(
+                        itertools.product(sub_taxa1.copy().iterrows(), 
+                                          sub_taxa2.copy().iterrows()), 1):
 
-                    names_to_delete1 = tmp_df1.taxon.tolist()
-                    names_to_delete2 = tmp_df2.taxon.tolist()
+                        row1.new_taxon_name = row1.taxon + f'|{count}'
+                        row2.new_taxon_name = row2.taxon + f'|{count}'
 
-                    count          = 0
-                    tmp_df1.taxon += f'|{count}'
-                    tmp_df2.taxon += f'|{count}'
-                    for (index1, row1), (index2, row2) in itertools.product(tmp_df1.iterrows(), 
-                                                                            tmp_df2.iterrows()):
-                        count += 1
-                        row1.taxon = re.sub('\|\d+$', 
-                                            fr'|{count}', 
-                                             row1.taxon,
-                                            re.M)
+                        new_taxa1 = new_taxa1.append(row1, 
+                                                     sort=True,
+                                                     ignore_index=True)
+                        new_taxa2 = new_taxa2.append(row2, 
+                                                     sort=True,
+                                                     ignore_index=True)
+            
+            new_taxa1 = new_taxa1.append(
+                taxa1.query('genome not in @new_taxa1.genome'),
+                sort        =True,
+                ignore_index=True
+            )
+            
+            new_taxa2 = new_taxa2.append(
+                taxa2.query('genome not in @new_taxa2.genome'),
+                sort        =True,
+                ignore_index=True
+            )
+            
+            new_taxa1.sort_values('genome', 
+                                  kind   ='mergesort', 
+                                  inplace=True)
+            new_taxa1.reset_index(drop   =True, 
+                                  inplace=True)
+            new_taxa2.sort_values('genome', 
+                                  kind   ='mergesort', 
+                                  inplace=True)
+            new_taxa2.reset_index(drop   =True, 
+                                  inplace=True)
 
-                        taxa1       = taxa1.append(row1, 
-                                                   ignore_index=True)
+            #
+            # match matrices index and column sorting as taxa tables
+            matrix1 = matrix1.reindex(index  =new_taxa1.taxon,
+                                      columns=new_taxa1.taxon,
+                                      copy   =True)
+            matrix1.index   = new_taxa1.new_taxon_name
+            matrix1.columns = new_taxa1.new_taxon_name
 
-                        reference_name          = re.sub('\|\d+$', 
-                                                         '', 
-                                                         row1.taxon)
-                        matrix1[    row1.taxon] = matrix1[    reference_name]
-                        matrix1.loc[row1.taxon] = matrix1.loc[reference_name]
+            matrix2 = matrix2.reindex(index  =new_taxa2.taxon,
+                                      columns=new_taxa2.taxon,
+                                      copy   =True)
+            matrix2.index   = new_taxa2.new_taxon_name
+            matrix2.columns = new_taxa2.new_taxon_name
 
+            new_taxa1.drop(columns='taxon', inplace=True)
+            new_taxa2.drop(columns='taxon', inplace=True)
 
-                        row2.taxon = re.sub('\|\d+$', 
-                                             f'|{count}', 
-                                             row2.taxon)
-                        taxa2       = taxa2.append(row2, 
-                                                   ignore_index=True)
-
-                        reference_name          = re.sub('\|\d+$', 
-                                                         '', 
-                                                         row2.taxon)
-                        matrix2[    row2.taxon] = matrix2[    reference_name]
-                        matrix2.loc[row2.taxon] = matrix2.loc[reference_name]
-
-
-                    taxa1.drop(  index  =taxa1.query('taxon.isin(@names_to_delete1)').index, 
-                                 inplace=True)
-                    matrix1.drop(index  =names_to_delete1, 
-                                 columns=names_to_delete1, 
-                                 inplace=True)
-
-                    taxa2.drop(index  =taxa2.query('taxon.isin(@names_to_delete2)').index, 
-                               inplace=True)
-                    matrix2.drop(index  =names_to_delete2, 
-                                 columns=names_to_delete2, 
-                                 inplace=True)
-
+            new_taxa1.rename(columns={'new_taxon_name':'taxon'}, inplace=True)
+            new_taxa2.rename(columns={'new_taxon_name':'taxon'}, inplace=True)
+            ############################################### ...up to here
+        
+        #
+        # once matrices were sorted to contain every possible pair between genes
+        #     present in the same genome, submit it to the <match_copies> function
+        if not taxa1.genome.is_unique or not taxa2.genome.is_unique:
+            matrix1, taxa1, matrix2, taxa2 = self.match_copies(matrix1, new_taxa1, 
+                                                               matrix2, new_taxa2, 
+                                                               force_single_copy)
+            
         #
         # sort both taxa tables according to genomes for properly matching
         taxa1.sort_values('genome', kind='mergesort', inplace=True)
@@ -612,22 +555,12 @@ class correlate_evolution:
         taxa1.reset_index(drop=True, inplace=True)
         taxa2.reset_index(drop=True, inplace=True)
 
-        #
-        # match matrices index and column sorting as taxa tables
         matrix1 = matrix1.reindex(index  =taxa1.taxon,
                                   columns=taxa1.taxon,
                                   copy   =True)
         matrix2 = matrix2.reindex(index  =taxa2.taxon,
                                   columns=taxa2.taxon,
                                   copy   =True)
-
-        #
-        # once matrices were sorted to contain every possible pair between genes
-        #     present in the same genome, submit it to the <match_copies> function
-        if not taxa1.genome.is_unique or not taxa2.genome.is_unique:
-            matrix1, taxa1, matrix2, taxa2 = self.match_copies(matrix1, matrix2, 
-                                                               taxa1,   taxa2, 
-                                                               force_single_copy)
 
         return(matrix1, taxa1,
                matrix2, taxa2,
