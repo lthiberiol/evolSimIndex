@@ -15,7 +15,7 @@ Evolutionary Similarity Index (<img src="https://render.githubusercontent.com/re
 <img src="https://render.githubusercontent.com/render/math?math=I_{ES}"> is less susceptible to phylogenetic noise than its tree-based counterparts, and more computationally efficient given that it bypasses tree reconstruction.
 
 
-**Preprint avaialable on bioRxiv: [https://doi.org/10.1101/2020.10.16.343293](https://doi.org/10.1101/2020.10.16.343293).**
+**Manuscript available on [doi.org/10.1093/gbe/evab187](https://doi.org/10.1093/gbe/evab187).**
 
 ---
 
